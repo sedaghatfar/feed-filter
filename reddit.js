@@ -45,18 +45,31 @@
         isTargetImage(img) {
           if (
             img.closest(
-              '[data-testid="tweetPhoto"], [data-testid="tweetPhotoCarousel"], [data-testid="card.wrapper"]'
+              '[data-testid="tweetPhoto"], [data-testid="tweetPhotoCarousel"], [data-testid="card.wrapper"], [data-testid="card.layoutLarge.media"], [data-testid="videoPlayer"]'
             )
           ) {
             return true;
           }
 
           const alt = (img.getAttribute("alt") || "").trim().toLowerCase();
-          if (alt === "image" || alt === "embedded image") {
+          if (alt === "image" || alt === "embedded image" || alt === "video") {
             return true;
           }
 
-          return looksLikeImageUi(img);
+          // X changes media wrapper markup frequently. If a large image survives the
+          // avatar/icon filters and is inside a tweet/article, treat it as post media.
+          return true;
+        },
+        isTargetVideo(video) {
+          if (
+            video.closest(
+              '[data-testid="videoPlayer"], [data-testid="videoComponent"], [data-testid="card.wrapper"], [aria-label*="Video"], [aria-label*="video"]'
+            )
+          ) {
+            return true;
+          }
+
+          return true;
         }
       };
     }
@@ -80,6 +93,9 @@
     );
   const IMAGE_MARKER = "feedFilterDeferredImage";
   const IMAGE_ATTR = "data-feed-filter-deferred-image";
+  const VIDEO_MARKER = "feedFilterDeferredVideo";
+  const VIDEO_ATTR = "data-feed-filter-deferred-video";
+  const VIDEO_OVERLAY_ATTR = "data-feed-filter-video-overlay";
   const STYLE_ID = `feed-filter-${SITE.key}-image-style`;
 
   function injectStyles() {
@@ -107,6 +123,52 @@
       img[${IMAGE_ATTR}="1"]:focus {
         outline: 2px solid ${SITE.focusColor};
         outline-offset: 2px;
+      }
+
+      video[${VIDEO_ATTR}="1"] {
+        border-radius: 12px;
+      }
+
+      [${VIDEO_OVERLAY_ATTR}="1"] {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px dashed #9aa9b3;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #eef1f3, #d7dfe4);
+        color: #31424d;
+        cursor: pointer;
+        font-family: Arial, sans-serif;
+        text-align: center;
+      }
+
+      [${VIDEO_OVERLAY_ATTR}="1"]:hover {
+        filter: brightness(0.97);
+      }
+
+      [${VIDEO_OVERLAY_ATTR}="1"]:focus {
+        outline: 2px solid ${SITE.focusColor};
+        outline-offset: 2px;
+      }
+
+      [${VIDEO_OVERLAY_ATTR}="1"] .feed-filter-video-overlay-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 20px;
+      }
+
+      [${VIDEO_OVERLAY_ATTR}="1"] .feed-filter-video-overlay-title {
+        font-size: 32px;
+        font-weight: 700;
+      }
+
+      [${VIDEO_OVERLAY_ATTR}="1"] .feed-filter-video-overlay-subtitle {
+        font-size: 24px;
+        color: #52646f;
       }
     `;
 
@@ -189,7 +251,7 @@
       .join(" ")
       .toLowerCase();
 
-    if (/(?:avatar|community icon|user icon|award|emoji|sprite|icon)/.test(metadata)) {
+    if (/(?:avatar|community icon|user icon|award|emoji|sprite|icon|profile image)/.test(metadata)) {
       return true;
     }
 
@@ -206,6 +268,58 @@
     }
 
     return !SITE.isTargetImage(img);
+  }
+
+  function shouldSkipVideo(video) {
+    if (!(video instanceof HTMLVideoElement)) {
+      return true;
+    }
+
+    if (typeof SITE.isTargetVideo !== "function") {
+      return true;
+    }
+
+    if (video.dataset[VIDEO_MARKER] === "1" || video.dataset.feedFilterVideoLoaded === "1") {
+      return true;
+    }
+
+    if (!SITE.findPostContainer(video)) {
+      return true;
+    }
+
+    if (video.closest("header, nav, [role='banner'], [role='navigation']")) {
+      return true;
+    }
+
+    const metadata = [
+      video.getAttribute("aria-label"),
+      video.className,
+      video.id,
+      video.currentSrc,
+      video.src,
+      video.poster
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (/(?:avatar|profile image|emoji|icon|badge|verified)/.test(metadata)) {
+      return true;
+    }
+
+    if (looksLikeExcludedUi(video)) {
+      return true;
+    }
+
+    const renderedWidth = video.clientWidth || Number(video.getAttribute("width")) || 0;
+    const renderedHeight = video.clientHeight || Number(video.getAttribute("height")) || 0;
+    const largestSide = Math.max(renderedWidth, renderedHeight);
+
+    if (largestSide > 0 && largestSide <= 64) {
+      return true;
+    }
+
+    return !SITE.isTargetVideo(video);
   }
 
   function stashPictureSources(img) {
@@ -331,6 +445,135 @@
     }
   }
 
+  function findVideoOverlayContainer(video) {
+    return (
+      video.closest('[data-testid="videoPlayer"]') ||
+      video.closest('[data-testid="videoComponent"]') ||
+      video.parentElement ||
+      video
+    );
+  }
+
+  function enforceDeferredVideo(video) {
+    if (!(video instanceof HTMLVideoElement) || video.dataset[VIDEO_MARKER] !== "1") {
+      return;
+    }
+
+    video.pause();
+  }
+
+  function ensureDeferredVideoGuard(video) {
+    if (!(video instanceof HTMLVideoElement) || video.dataset.feedFilterVideoGuardAttached === "1") {
+      return;
+    }
+
+    video.dataset.feedFilterVideoGuardAttached = "1";
+    video.addEventListener("play", () => enforceDeferredVideo(video), true);
+    video.addEventListener("loadeddata", () => enforceDeferredVideo(video), true);
+  }
+
+  function createVideoOverlay(video) {
+    const container = findVideoOverlayContainer(video);
+    if (!(container instanceof HTMLElement)) {
+      return null;
+    }
+
+    let overlay = container.querySelector(`[${VIDEO_OVERLAY_ATTR}="1"]`);
+    if (overlay instanceof HTMLElement) {
+      return overlay;
+    }
+
+    const computedStyle = window.getComputedStyle(container);
+    if (computedStyle.position === "static") {
+      container.dataset.feedFilterVideoOverlayPositioned = "1";
+      container.style.position = "relative";
+    }
+
+    overlay = document.createElement("div");
+    overlay.setAttribute(VIDEO_OVERLAY_ATTR, "1");
+    overlay.setAttribute("role", "button");
+    overlay.setAttribute("tabindex", "0");
+    overlay.setAttribute("aria-label", `Hidden ${SITE.label} video. Click to load.`);
+    overlay.innerHTML =
+      '<div class="feed-filter-video-overlay-copy">' +
+        '<span class="feed-filter-video-overlay-title">Video hidden</span>' +
+        '<span class="feed-filter-video-overlay-subtitle">Click to load</span>' +
+      "</div>";
+
+    const renderedHeight = video.clientHeight || Number(video.getAttribute("height")) || 0;
+    if (renderedHeight > 0) {
+      overlay.style.minHeight = `${renderedHeight}px`;
+    } else {
+      overlay.style.minHeight = "180px";
+    }
+
+    container.appendChild(overlay);
+    return overlay;
+  }
+
+  function cleanupLoadedVideo(video) {
+    if (!(video instanceof HTMLVideoElement)) {
+      return;
+    }
+
+    video.dataset.feedFilterVideoLoaded = "1";
+    delete video.dataset[VIDEO_MARKER];
+    video.removeAttribute(VIDEO_ATTR);
+
+    const originalPreload = video.dataset.feedFilterOriginalVideoPreload;
+    if (originalPreload) {
+      video.setAttribute("preload", originalPreload);
+    } else {
+      video.removeAttribute("preload");
+    }
+
+    const originalAutoplay = video.dataset.feedFilterOriginalVideoAutoplay;
+    if (originalAutoplay === "1") {
+      video.setAttribute("autoplay", "");
+    } else {
+      video.removeAttribute("autoplay");
+    }
+
+    const container = findVideoOverlayContainer(video);
+    if (container instanceof HTMLElement) {
+      const overlay = container.querySelector(`[${VIDEO_OVERLAY_ATTR}="1"]`);
+      if (overlay) {
+        overlay.remove();
+      }
+
+      if (container.dataset.feedFilterVideoOverlayPositioned === "1") {
+        container.style.removeProperty("position");
+        delete container.dataset.feedFilterVideoOverlayPositioned;
+      }
+    }
+  }
+
+  function loadDeferredVideo(video) {
+    if (!(video instanceof HTMLVideoElement) || video.dataset[VIDEO_MARKER] !== "1") {
+      return;
+    }
+
+    cleanupLoadedVideo(video);
+    video.play().catch(() => {});
+  }
+
+  function deferVideo(video) {
+    if (shouldSkipVideo(video)) {
+      return;
+    }
+
+    video.dataset[VIDEO_MARKER] = "1";
+    video.dataset.feedFilterOriginalVideoPreload = video.getAttribute("preload") || "";
+    video.dataset.feedFilterOriginalVideoAutoplay = video.hasAttribute("autoplay") ? "1" : "";
+
+    video.setAttribute("preload", "none");
+    video.removeAttribute("autoplay");
+    video.setAttribute(VIDEO_ATTR, "1");
+    ensureDeferredVideoGuard(video);
+    createVideoOverlay(video);
+    enforceDeferredVideo(video);
+  }
+
   function scan(root = document) {
     if (!(root instanceof Element || root instanceof Document)) {
       return;
@@ -341,8 +584,17 @@
       return;
     }
 
+    if (root instanceof HTMLVideoElement) {
+      deferVideo(root);
+      return;
+    }
+
     root.querySelectorAll("img").forEach((img) => {
       deferImage(img);
+    });
+
+    root.querySelectorAll("video").forEach((video) => {
+      deferVideo(video);
     });
   }
 
@@ -367,6 +619,42 @@
 
     event.preventDefault();
     loadDeferredImage(img);
+    return;
+  }
+
+  function handleVideoActivation(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const overlay = target.closest(`[${VIDEO_OVERLAY_ATTR}="1"]`);
+    if (!overlay) {
+      return;
+    }
+
+    if (event.type === "keydown") {
+      const keyEvent = event;
+      if (keyEvent.key !== "Enter" && keyEvent.key !== " ") {
+        return;
+      }
+      keyEvent.preventDefault();
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const container = overlay.parentElement;
+    if (!(container instanceof HTMLElement)) {
+      return;
+    }
+
+    const video = container.querySelector(`video[${VIDEO_ATTR}="1"]`);
+    if (!(video instanceof HTMLVideoElement)) {
+      return;
+    }
+
+    loadDeferredVideo(video);
   }
 
   injectStyles();
@@ -374,6 +662,8 @@
 
   document.addEventListener("click", handleActivation, true);
   document.addEventListener("keydown", handleActivation, true);
+  document.addEventListener("click", handleVideoActivation, true);
+  document.addEventListener("keydown", handleVideoActivation, true);
 
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
