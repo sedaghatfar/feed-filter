@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Feed Filter 2.3.0",
+  "version": "2.3.0",
+  "description": "Adds pause screens on selected social sites, blocks Instagram Reels feed and YouTube Shorts, hides Facebook Reels, and defers Reddit post images until clicked.",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://reddit.com/*",
+        "*://*.reddit.com/*",
+        "*://instagram.com/*",
+        "*://*.instagram.com/*",
+        "*://facebook.com/*",
+        "*://*.facebook.com/*",
+        "*://tiktok.com/*",
+        "*://*.tiktok.com/*",
+        "*://x.com/*",
+        "*://*.x.com/*"
+      ],
+      "js": [
+        "pause.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/*",
+        "https://facebook.com/*"
+      ],
+      "js": [
+        "facebook.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://reddit.com/*",
+        "*://*.reddit.com/*"
+      ],
+      "js": [
+        "reddit.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://instagram.com/*",
+        "*://*.instagram.com/*"
+      ],
+      "js": [
+        "instagram.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://youtube.com/*",
+        "*://www.youtube.com/*"
+      ],
+      "js": [
+        "youtube.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}
