@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Feed Filter 2.3.0",
   "version": "2.3.0",
-  "description": "Adds pause screens on selected social sites, blocks Instagram Reels feed and YouTube Shorts, hides Facebook Reels, and defers Reddit images plus X images and videos until clicked.",
+  "description": "Adds pause screens on selected social sites, blocks Instagram Reels feed and YouTube Shorts, hides Facebook Reels, hides Reddit fanart/cosplay posts, and defers Reddit images plus X images and videos until clicked.",
   "content_scripts": [
     {
       "matches": [
