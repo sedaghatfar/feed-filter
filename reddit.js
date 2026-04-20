@@ -91,11 +91,13 @@
         '<text x="400" y="340" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="#52646f">Click to load</text>' +
       "</svg>"
     );
+  const REDDIT_BLOCKED_FLAIR_PATTERN = /\b(?:fan[\s-]?art|cosplay)\b/i;
   const IMAGE_MARKER = "feedFilterDeferredImage";
   const IMAGE_ATTR = "data-feed-filter-deferred-image";
   const VIDEO_MARKER = "feedFilterDeferredVideo";
   const VIDEO_ATTR = "data-feed-filter-deferred-video";
   const VIDEO_OVERLAY_ATTR = "data-feed-filter-video-overlay";
+  const HIDDEN_POST_ATTR = "data-feed-filter-hidden-post";
   const STYLE_ID = `feed-filter-${SITE.key}-image-style`;
 
   function injectStyles() {
@@ -170,6 +172,10 @@
         font-size: 24px;
         color: #52646f;
       }
+
+      [${HIDDEN_POST_ATTR}="1"] {
+        display: none !important;
+      }
     `;
 
     (document.head || document.documentElement).appendChild(style);
@@ -220,6 +226,125 @@
     }
 
     return false;
+  }
+
+  function getRedditPostContainer(node) {
+    if (SITE.key !== "reddit" || !(node instanceof Element)) {
+      return null;
+    }
+
+    return SITE.findPostContainer(node);
+  }
+
+  function getRedditFlairCandidates(post) {
+    if (!(post instanceof HTMLElement)) {
+      return [];
+    }
+
+    return Array.from(
+      post.querySelectorAll(
+        [
+          '[data-testid*="flair"]',
+          '[id*="flair"]',
+          '[class*="flair"]',
+          '[slot*="flair"]',
+          '[aria-label*="flair" i]',
+          'a[href*="flair_name="]',
+          'a[href*="/search?q=flair_name%3A"]'
+        ].join(", ")
+      )
+    );
+  }
+
+  function getRedditFlairText(post) {
+    if (!(post instanceof HTMLElement)) {
+      return "";
+    }
+
+    const values = new Set();
+
+    [
+      post.getAttribute("post-flair"),
+      post.getAttribute("data-post-flair"),
+      post.getAttribute("flair-text"),
+      post.getAttribute("data-flair-text"),
+      post.getAttribute("aria-label")
+    ]
+      .filter(Boolean)
+      .forEach((value) => values.add(String(value).toLowerCase()));
+
+    getRedditFlairCandidates(post).forEach((node) => {
+      if (!(node instanceof HTMLElement)) {
+        return;
+      }
+
+      [
+        node.textContent,
+        node.getAttribute("aria-label"),
+        node.getAttribute("data-testid"),
+        node.getAttribute("id"),
+        node.getAttribute("slot"),
+        node.className
+      ]
+        .filter(Boolean)
+        .forEach((value) => values.add(String(value).toLowerCase()));
+    });
+
+    return Array.from(values).join(" ");
+  }
+
+  function shouldHideRedditPost(post) {
+    if (!(post instanceof HTMLElement) || SITE.key !== "reddit") {
+      return false;
+    }
+
+    if (post.dataset.feedFilterHiddenFlair === "1") {
+      return post.dataset.feedFilterHiddenFlair === "1";
+    }
+
+    const flairText = getRedditFlairText(post);
+    const shouldHide = REDDIT_BLOCKED_FLAIR_PATTERN.test(flairText);
+
+    if (shouldHide) {
+      post.dataset.feedFilterHiddenFlair = "1";
+    }
+
+    return shouldHide;
+  }
+
+  function hideRedditPost(post) {
+    if (!(post instanceof HTMLElement) || shouldHideRedditPost(post) === false) {
+      return;
+    }
+
+    post.setAttribute(HIDDEN_POST_ATTR, "1");
+    post.setAttribute("aria-hidden", "true");
+  }
+
+  function scanRedditPostFilters(root = document) {
+    if (SITE.key !== "reddit" || !(root instanceof Element || root instanceof Document)) {
+      return;
+    }
+
+    const posts = new Set();
+
+    const ownPost = getRedditPostContainer(root);
+    if (ownPost) {
+      posts.add(ownPost);
+    }
+
+    root
+      .querySelectorAll(".thing, shreddit-post, article, [data-testid='post-container'], [data-click-id='body']")
+      .forEach((post) => {
+        const container = getRedditPostContainer(post);
+        if (container) {
+          posts.add(container);
+        }
+      });
+
+    posts.forEach((post) => {
+      hideRedditPost(post);
+    });
   }
 
   function shouldSkipImage(img) {
@@ -578,6 +703,8 @@
     if (!(root instanceof Element || root instanceof Document)) {
       return;
     }
+
+    scanRedditPostFilters(root);
 
     if (root instanceof HTMLImageElement) {
       deferImage(root);
